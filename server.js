@@ -1,28 +1,68 @@
-require('dotenv').config();
 const express = require('express');
-const multer = require('multer');
+const axios = require('axios');
 const path = require('path');
-const parseCSV = require('./utils/csvParser');
-const { createContact } = require('./utils/freshdesk');
+require('dotenv').config();
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+const PORT = process.env.PORT || 3000;
 
 app.use(express.static('public'));
+app.use(express.json());
 
-app.post('/upload', upload.single('contacts'), async (req, res) => {
-  const filePath = req.file.path;
+// Serve frontend
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Fetch Freshcaller call logs
+app.get('/api/freshcaller/calls', async (req, res) => {
   try {
-    const contacts = await parseCSV(filePath);
-    for (const contact of contacts) {
-      await createContact(contact);
-    }
-    res.send('? Contacts distributed successfully.');
-  } catch (err) {
-    console.error('Upload error:', err);
-    res.status(500).send('? Failed to process contacts.');
+    const response = await axios.get('https://api.freshcaller.com/v2/calls', {
+      headers: {
+        Authorization: `Token token=${process.env.FRESHCALLER_API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    res.json(response.data);
+  } catch (error) {
+    console.error('Freshcaller API error:', error.message);
+    res.status(500).send('Error fetching Freshcaller data');
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`?? Server running on http://localhost:${PORT}`));
+// Create Freshdesk ticket
+app.post('/api/freshdesk/ticket', async (req, res) => {
+  const { name, email, subject, description } = req.body;
+
+  try {
+    const response = await axios.post(
+      `https://${process.env.FRESHDESK_DOMAIN}/api/v2/tickets`,
+      {
+        name,
+        email,
+        subject,
+        description,
+        priority: 1,
+        status: 2
+      },
+      {
+        auth: {
+          username: process.env.FRESHDESK_API_KEY,
+          password: 'X' // Freshdesk requires a dummy password
+        },
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Freshdesk API error:', error.message);
+    res.status(500).send('Error creating Freshdesk ticket');
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
