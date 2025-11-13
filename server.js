@@ -1,66 +1,42 @@
 const express = require('express');
-const axios = require('axios');
+const multer = require('multer');
+const csv = require('csv-parser');
+const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Serve static files
 app.use(express.static('public'));
 app.use(express.json());
 
-// Serve frontend
+// Multer setup for file uploads
+const upload = multer({ dest: 'uploads/' });
+
+// CSV upload and parse route
+app.post('/upload', upload.single('file'), (req, res) => {
+  const results = [];
+  const filePath = req.file.path;
+
+  fs.createReadStream(filePath)
+    .pipe(csv())
+    .on('data', (data) => results.push(data))
+    .on('end', () => {
+      console.log('CSV parsed:', results);
+      fs.unlinkSync(filePath); // Clean up uploaded file
+      res.json({ message: 'File uploaded and parsed successfully', data: results });
+    })
+    .on('error', (err) => {
+      console.error('CSV parsing error:', err);
+      res.status(500).send('Error parsing CSV');
+    });
+});
+
+// Homepage
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Fetch Freshcaller call logs
-app.get('/api/freshcaller/calls', async (req, res) => {
-  try {
-    const response = await axios.get('https://api.freshcaller.com/v2/calls', {
-      headers: {
-        Authorization: `Token token=${process.env.FRESHCALLER_API_KEY}`,
-        'Content-Type': 'application/json'
-      }
-    });
-    res.json(response.data);
-  } catch (error) {
-    console.error('Freshcaller API error:', error.message);
-    res.status(500).send('Error fetching Freshcaller data');
-  }
-});
-
-// Create Freshdesk ticket
-app.post('/api/freshdesk/ticket', async (req, res) => {
-  const { name, email, subject, description } = req.body;
-
-  try {
-    const response = await axios.post(
-      `https://${process.env.FRESHDESK_DOMAIN}/api/v2/tickets`,
-      {
-        name,
-        email,
-        subject,
-        description,
-        priority: 1,
-        status: 2
-      },
-      {
-        auth: {
-          username: process.env.FRESHDESK_API_KEY,
-          password: 'X' // Freshdesk requires a dummy password
-        },
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-
-    res.json(response.data);
-  } catch (error) {
-    console.error('Freshdesk API error:', error.message);
-    res.status(500).send('Error creating Freshdesk ticket');
-  }
 });
 
 app.listen(PORT, () => {
